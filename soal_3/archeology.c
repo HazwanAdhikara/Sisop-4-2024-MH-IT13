@@ -1,5 +1,4 @@
 #define FUSE_USE_VERSION 28
-#define _XOPEN_SOURCE 500
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,33 +10,31 @@
 #include <dirent.h>
 #include <errno.h>
 
+#define PART_SIZE 10240  // 10 KB
+#define MAX_PATH 1000
+
 static const char *dirpath = "/home/rrayyaann/sisop/percobaan/m4s3/relics";
 
-static int archeology_getattr(const char *path, struct stat *stbuf)
-{
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
+static int archeology_getattr(const char *path, struct stat *stbuf) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
     int res = lstat(fpath, stbuf);
     if (res == -1)
         return -errno;
     return 0;
 }
 
-static int archeology_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
-{
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
+static int archeology_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
 
-    DIR *dp;
-    struct dirent *de;
-
-    dp = opendir(fpath);
-    if (dp == NULL)
+    DIR *dp = opendir(fpath);
+    if (!dp)
         return -errno;
 
+    struct dirent *de;
     while ((de = readdir(dp)) != NULL) {
-        struct stat st;
-        memset(&st, 0, sizeof(st));
+        struct stat st = {0};
         st.st_ino = de->d_ino;
         st.st_mode = de->d_type << 12;
         if (filler(buf, de->d_name, &st, 0))
@@ -48,10 +45,9 @@ static int archeology_readdir(const char *path, void *buf, fuse_fill_dir_t fille
     return 0;
 }
 
-static int archeology_open(const char *path, struct fuse_file_info *fi)
-{
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
+static int archeology_open(const char *path, struct fuse_file_info *fi) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
 
     int res = open(fpath, fi->flags);
     if (res == -1)
@@ -61,49 +57,90 @@ static int archeology_open(const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
-static int archeology_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
-    int fd = fi->fh;
-    int res = pread(fd, buf, size, offset);
-    if (res == -1)
-        res = -errno;
+static int archeology_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
 
-    return res;
-}
+    size_t total_bytes_read = 0;
+    size_t part_size = PART_SIZE;
+    int part_number = offset / part_size;
 
-static int archeology_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
+    while (size > 0) {
+        char part_file[MAX_PATH];
+        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, part_number);
 
-    int fd = open(fpath, O_WRONLY);
-    if (fd == -1)
-        return -errno;
+        int fd = open(part_file, O_RDONLY);
+        if (fd == -1)
+            break;
 
-    int res = pwrite(fd, buf, size, offset);
-    if (res == -1)
-        res = -errno;
+        size_t part_offset = offset % part_size;
+        size_t bytes_to_read = part_size - part_offset < size ? part_size - part_offset : size;
+        ssize_t bytes_read = pread(fd, buf + total_bytes_read, bytes_to_read, part_offset);
+        if (bytes_read == -1) {
+            close(fd);
+            return -errno;
+        }
 
-    close(fd);
-
-    if (res != -1) {
-        char split_command[2048];
-        sprintf(split_command, "split -b 10k -d --additional-suffix=.part %s %s.part", fpath, fpath);
-        system(split_command);
-        unlink(fpath);  
+        total_bytes_read += bytes_read;
+        size -= bytes_read;
+        offset += bytes_read;
+        part_number++;
+        close(fd);
     }
 
-    return res;
+    return total_bytes_read;
 }
 
-static int archeology_unlink(const char *path)
-{
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
+static int archeology_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
 
-    char rm_command[1024];
-    sprintf(rm_command, "rm %s.part*", fpath);
-    system(rm_command);
+    size_t part_size = PART_SIZE;
+    int part_number = offset / part_size;
+    size_t total_bytes_written = 0;
+
+    while (size > 0) {
+        char part_file[MAX_PATH];
+        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, part_number);
+
+        size_t part_offset = offset % part_size;
+        size_t bytes_to_write = part_size - part_offset < size ? part_size - part_offset : size;
+        int fd = open(part_file, O_WRONLY | O_CREAT, 0644);
+        if (fd == -1)
+            return -errno;
+
+        ssize_t bytes_written = pwrite(fd, buf + total_bytes_written, bytes_to_write, part_offset);
+        if (bytes_written == -1) {
+            close(fd);
+            return -errno;
+        }
+
+        total_bytes_written += bytes_written;
+        size -= bytes_written;
+        offset += bytes_written;
+        part_number++;
+        close(fd);
+    }
+
+    return total_bytes_written;
+}
+
+static int archeology_unlink(const char *path) {
+    char fpath[MAX_PATH];
+    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
+
+    int res = 0;
+    char part_file[MAX_PATH];
+    for (int i = 0;; i++) {
+        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, i);
+        res = unlink(part_file);
+        if (res == -1) {
+            if (errno == ENOENT)
+                break;
+            else
+                return -errno;
+        }
+    }
 
     return 0;
 }
@@ -117,8 +154,7 @@ static struct fuse_operations archeology_oper = {
     .unlink = archeology_unlink,
 };
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     umask(0);
     return fuse_main(argc, argv, &archeology_oper, NULL);
 }

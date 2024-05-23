@@ -486,8 +486,7 @@ Seorang arkeolog menemukan sebuah gua yang didalamnya tersimpan banyak relik dar
 Ketentuan :
 
 a.) Buatlah sebuah direktori dengan ketentuan seperti pada tree berikut
--
-<img heigth="300" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/d8037590-d724-47f0-84ee-727c18842dca>
+- ![image](https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/027a559e-b907-4503-9106-b951f4ce427b)
 
 b.) Direktori **[nama_bebas]** adalah direktori FUSE dengan direktori asalnya adalah direktori relics. Ketentuan Direktori **[nama_bebas]** adalah sebagai berikut :
 - Ketika dilakukan listing, isi dari direktori [nama_bebas] adalah semua relic dari relics yang telah tergabung.
@@ -946,6 +945,7 @@ static struct fuse_operations archeology_oper = {
 ```
 
 11. Fungsi `int main` dalam kode FUSE ini bertanggung jawab untuk menginisialisasi dan menjalankan sistem file FUSE.
+- terdapat inisialisasi dan konfigurasi FUSE menggunakan struct `archeology_oper`. Struct ini menghubungkan fungsi-fungsi yang akan dipanggil oleh FUSE saat operasi file dilakukan (seperti membaca, menulis, membuka, menghapus, dan membuat direktori).
 ```bash
 int main(int argc, char *argv[]) {
     umask(0);

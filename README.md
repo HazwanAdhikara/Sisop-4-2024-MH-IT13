@@ -78,7 +78,6 @@ Catatan:
 `pastibisa.c`
 
 ```bash
-
 #define FUSE_USE_VERSION 28
 #include <fuse.h>
 #include <stdio.h>
@@ -417,7 +416,6 @@ int main(int argc, char *argv[])
     umask(0);
     return fuse_main(argc, argv, &xmp_oper, NULL);
 }
-
 ```
 
 #### > Penjelasan
@@ -486,8 +484,10 @@ Kesimpulan Kode program ini memungkinkan pengguna untuk mengakses file dan direk
 #### > Isi Soal
 Seorang arkeolog menemukan sebuah gua yang didalamnya tersimpan banyak relik dari zaman praaksara, sayangnya semua barang yang ada pada gua tersebut memiliki bentuk yang terpecah belah akibat bencana yang tidak diketahui. Sang arkeolog ingin menemukan cara cepat agar ia bisa menggabungkan relik-relik yang terpecah itu, namun karena setiap pecahan relik itu masih memiliki nilai tersendiri, ia memutuskan untuk membuat sebuah file system yang mana saat ia mengakses file system tersebut ia dapat melihat semua relik dalam keadaan utuh, sementara relik yang asli tidak berubah sama sekali.
 Ketentuan :
+
 a.) Buatlah sebuah direktori dengan ketentuan seperti pada tree berikut
-- ![image](https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/d8037590-d724-47f0-84ee-727c18842dca)
+-
+<img heigth="300" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/d8037590-d724-47f0-84ee-727c18842dca>
 
 b.) Direktori **[nama_bebas]** adalah direktori FUSE dengan direktori asalnya adalah direktori relics. Ketentuan Direktori **[nama_bebas]** adalah sebagai berikut :
 - Ketika dilakukan listing, isi dari direktori [nama_bebas] adalah semua relic dari relics yang telah tergabung.
@@ -718,7 +718,248 @@ int main(int argc, char *argv[]) {
 }
 ```
 #### > Penjelasan
+### archeology.c
+
+1. Fungsi `*folder_path` untuk mendefinisikan path folder tempat file disimpan
+```bash
+static const char *folder_path = "/home/rrayyaann/sisop/percobaan/m4s3/relics";
+```
+
+2. Fungsi `archeology_getattr` untuk mendapatkan atribut file seperti mode, ukuran, dan lain-lain.
+```bash
+static int archeology_getattr(const char *path, struct stat *stbuf) {
+    memset(stbuf, 0, sizeof(struct stat));
+    if (strcmp(path, "/") == 0) {
+        stbuf->st_mode = S_IFDIR | 0755;
+        stbuf->st_nlink = 2;
+    } else {
+        char fpath[1000];
+        snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+        stbuf->st_mode = S_IFREG | 0444;
+        stbuf->st_nlink = 1;
+        stbuf->st_size = 0;
+
+        int i = 0;
+        char part_path[1100];
+        FILE *fp;
+
+        while (1) {
+            snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, i++);
+            fp = fopen(part_path, "rb");
+            if (!fp) break;
+
+            fseek(fp, 0L, SEEK_END);
+            stbuf->st_size += ftell(fp);
+            fclose(fp);
+        }
+
+        if (i == 1) return -ENOENT;
+    }
+    return 0;
+}
+```
+
+3. Fungsi `archeology_readdir` untuk membaca isi direktori.
+```bash
+static int archeology_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+    (void) offset;
+    (void) fi;
+
+    filler(buf, ".", NULL, 0);
+    filler(buf, "..", NULL, 0);
+
+    DIR *dp;
+    struct dirent *de;
+    dp = opendir(folder_path);
+    if (dp == NULL) return -errno;
+
+    while ((de = readdir(dp)) != NULL) {
+        if (strstr(de->d_name, ".000") != NULL) {
+            char base_name[256];
+            strncpy(base_name, de->d_name, strlen(de->d_name) - 4);
+            base_name[strlen(de->d_name) - 4] = '\0';
+            filler(buf, base_name, NULL, 0);
+        }
+    }
+    closedir(dp);
+    return 0;
+}
+```
+
+4. Fungsi `archeology_open` untuk membuka file.
+```bash
+static int archeology_open(const char *path, struct fuse_file_info *fi) {
+    return 0;
+}
+```
+
+5. Fungsi `archeology_read` untuk membaca data dari file
+```bash
+static int archeology_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    (void) fi;
+    size_t len;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+
+    int i = 0;
+    char part_path[1100];
+    size_t read_size = 0;
+
+    while (size > 0) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, i++);
+        FILE *fp = fopen(part_path, "rb");
+        if (!fp) break;
+
+        fseek(fp, 0L, SEEK_END);
+        size_t part_size = ftell(fp);
+        fseek(fp, 0L, SEEK_SET);
+
+        if (offset >= part_size) {
+            offset -= part_size;
+            fclose(fp);
+            continue;
+        }
+
+        fseek(fp, offset, SEEK_SET);
+        len = fread(buf, 1, size, fp);
+        fclose(fp);
+
+        buf += len;
+        size -= len;
+        read_size += len;
+        offset = 0;
+    }
+    return read_size;
+}
+```
+
+6. Fungsi `archeology_write`
+```bash
+static int archeology_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    (void) fi;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+
+    int part_num = offset / 10000;
+    size_t part_offset = offset % 10000;
+    size_t written_size = 0;
+    char part_path[1100];
+
+    while (size > 0) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        FILE *fp = fopen(part_path, "r+b");
+        if (!fp) {
+            fp = fopen(part_path, "wb");
+            if (!fp) return -errno;
+        }
+
+        fseek(fp, part_offset, SEEK_SET);
+        size_t write_size = size > (10000 - part_offset) ? (10000 - part_offset) : size;
+        fwrite(buf, 1, write_size, fp);
+        fclose(fp);
+
+        buf += write_size;
+        size -= write_size;
+        written_size += write_size;
+        part_offset = 0;
+    }
+    return written_size;
+}
+```
+
+7. Fungsi `archeology_unlink` untuk menghapus file
+```bash
+static int archeology_unlink(const char *path) {
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+
+    int part_num = 0;
+    char part_path[1100];
+    int res = 0;
+
+    while (1) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        res = unlink(part_path);
+        if (res == -1 && errno == ENOENT) break;
+        else if (res == -1) return -errno;
+    }
+    return 0;
+}
+```
+
+8. Fungsi `archeology_create` untuk membuat file baru
+```bash
+static int archeology_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    (void) fi;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s.000", folder_path, path);
+
+    int res = creat(fpath, mode);
+    if (res == -1) return -errno;
+
+    close(res);
+    return 0;
+}
+```
+
+9. Fungsi `archeology_truncate` Untuk memangkas/memotong (truncate) file.
+```bash
+static int archeology_truncate(const char *path, off_t size) {
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+
+    int part_num = 0;
+    char part_path[1100];
+    off_t remaining_size = size;
+
+    while (remaining_size > 0) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        size_t part_size = remaining_size > 10000 ? 10000 : remaining_size;
+        int res = truncate(part_path, part_size);
+        if (res == -1) return -errno;
+        remaining_size -= part_size;
+    }
+
+    while (1) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        int res = unlink(part_path);
+        if (res == -1 && errno == ENOENT) break;
+        else if (res == -1) return -errno;
+    }
+
+    return 0;
+}
+```
+
+10. Fungsi `fuse_operations` merupakan struktur operasi FUSE
+```bash
+static struct fuse_operations archeology_oper = {
+    .getattr = archeology_getattr,
+    .readdir = archeology_readdir,
+    .open = archeology_open,
+    .read = archeology_read,
+    .write = archeology_write,
+    .unlink = archeology_unlink,
+    .create = archeology_create,
+    .truncate = archeology_truncate,
+};
+```
+
+11. Fungsi `int main` dalam kode FUSE ini bertanggung jawab untuk menginisialisasi dan menjalankan sistem file FUSE.
+```bash
+int main(int argc, char *argv[]) {
+    umask(0);
+    return fuse_main(argc, argv, &archeology_oper, NULL);
+}
+```
+
+12. Isi file configurasi samba yang menuju ke folder report
+<img width="450" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/08c3949c-4592-4a6e-aeb9-b49623448871>
+
 #### > Dokumentasi
-#### > Revisi
+<img width="1710" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/c9462e65-beec-40e0-809d-d3cb234adc7a>
+<img width="1710" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/1409a8d9-1da1-4de7-b836-f79d9d3c39f6>
+<img width="1710" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/847a92db-0e06-47b3-ac5c-d878cdb40ccf>
+<img width="1710" alt="image" src=https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/150534107/0f2d24e7-4b9f-41c4-a24e-5eb2302d0e88>
 
 ---

@@ -2,144 +2,192 @@
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <dirent.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
-#define PART_SIZE 10240  // 10 KB
-#define MAX_PATH 1000
-
-static const char *dirpath = "/home/rrayyaann/sisop/percobaan/m4s3/relics";
+static const char *folder_path = "/home/rrayyaann/sisop/percobaan/m4s3/relics";
 
 static int archeology_getattr(const char *path, struct stat *stbuf) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
-    int res = lstat(fpath, stbuf);
-    if (res == -1)
-        return -errno;
+    memset(stbuf, 0, sizeof(struct stat));
+    if (strcmp(path, "/") == 0) {
+        stbuf->st_mode = S_IFDIR | 0755;
+        stbuf->st_nlink = 2;
+    } else {
+        char fpath[1000];
+        snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+        stbuf->st_mode = S_IFREG | 0444;
+        stbuf->st_nlink = 1;
+        stbuf->st_size = 0;
+
+        int i = 0;
+        char part_path[1100];
+        FILE *fp;
+
+        while (1) {
+            snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, i++);
+            fp = fopen(part_path, "rb");
+            if (!fp) break;
+
+            fseek(fp, 0L, SEEK_END);
+            stbuf->st_size += ftell(fp);
+            fclose(fp);
+        }
+
+        if (i == 1) return -ENOENT;
+    }
     return 0;
 }
 
 static int archeology_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
+    (void) offset;
+    (void) fi;
 
-    DIR *dp = opendir(fpath);
-    if (!dp)
-        return -errno;
+    filler(buf, ".", NULL, 0);
+    filler(buf, "..", NULL, 0);
 
+    DIR *dp;
     struct dirent *de;
-    while ((de = readdir(dp)) != NULL) {
-        struct stat st = {0};
-        st.st_ino = de->d_ino;
-        st.st_mode = de->d_type << 12;
-        if (filler(buf, de->d_name, &st, 0))
-            break;
-    }
+    dp = opendir(folder_path);
+    if (dp == NULL) return -errno;
 
+    while ((de = readdir(dp)) != NULL) {
+        if (strstr(de->d_name, ".000") != NULL) {
+            char base_name[256];
+            strncpy(base_name, de->d_name, strlen(de->d_name) - 4);
+            base_name[strlen(de->d_name) - 4] = '\0';
+            filler(buf, base_name, NULL, 0);
+        }
+    }
     closedir(dp);
     return 0;
 }
 
 static int archeology_open(const char *path, struct fuse_file_info *fi) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
-
-    int res = open(fpath, fi->flags);
-    if (res == -1)
-        return -errno;
-
-    fi->fh = res;
     return 0;
 }
 
 static int archeology_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
+    (void) fi;
+    size_t len;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
 
-    size_t total_bytes_read = 0;
-    size_t part_size = PART_SIZE;
-    int part_number = offset / part_size;
+    int i = 0;
+    char part_path[1100];
+    size_t read_size = 0;
 
     while (size > 0) {
-        char part_file[MAX_PATH];
-        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, part_number);
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, i++);
+        FILE *fp = fopen(part_path, "rb");
+        if (!fp) break;
 
-        int fd = open(part_file, O_RDONLY);
-        if (fd == -1)
-            break;
+        fseek(fp, 0L, SEEK_END);
+        size_t part_size = ftell(fp);
+        fseek(fp, 0L, SEEK_SET);
 
-        size_t part_offset = offset % part_size;
-        size_t bytes_to_read = part_size - part_offset < size ? part_size - part_offset : size;
-        ssize_t bytes_read = pread(fd, buf + total_bytes_read, bytes_to_read, part_offset);
-        if (bytes_read == -1) {
-            close(fd);
-            return -errno;
+        if (offset >= part_size) {
+            offset -= part_size;
+            fclose(fp);
+            continue;
         }
 
-        total_bytes_read += bytes_read;
-        size -= bytes_read;
-        offset += bytes_read;
-        part_number++;
-        close(fd);
-    }
+        fseek(fp, offset, SEEK_SET);
+        len = fread(buf, 1, size, fp);
+        fclose(fp);
 
-    return total_bytes_read;
+        buf += len;
+        size -= len;
+        read_size += len;
+        offset = 0;
+    }
+    return read_size;
 }
 
 static int archeology_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
+    (void) fi;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
 
-    size_t part_size = PART_SIZE;
-    int part_number = offset / part_size;
-    size_t total_bytes_written = 0;
+    int part_num = offset / 10000;
+    size_t part_offset = offset % 10000;
+    size_t written_size = 0;
+    char part_path[1100];
 
     while (size > 0) {
-        char part_file[MAX_PATH];
-        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, part_number);
-
-        size_t part_offset = offset % part_size;
-        size_t bytes_to_write = part_size - part_offset < size ? part_size - part_offset : size;
-        int fd = open(part_file, O_WRONLY | O_CREAT, 0644);
-        if (fd == -1)
-            return -errno;
-
-        ssize_t bytes_written = pwrite(fd, buf + total_bytes_written, bytes_to_write, part_offset);
-        if (bytes_written == -1) {
-            close(fd);
-            return -errno;
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        FILE *fp = fopen(part_path, "r+b");
+        if (!fp) {
+            fp = fopen(part_path, "wb");
+            if (!fp) return -errno;
         }
 
-        total_bytes_written += bytes_written;
-        size -= bytes_written;
-        offset += bytes_written;
-        part_number++;
-        close(fd);
-    }
+        fseek(fp, part_offset, SEEK_SET);
+        size_t write_size = size > (10000 - part_offset) ? (10000 - part_offset) : size;
+        fwrite(buf, 1, write_size, fp);
+        fclose(fp);
 
-    return total_bytes_written;
+        buf += write_size;
+        size -= write_size;
+        written_size += write_size;
+        part_offset = 0;
+    }
+    return written_size;
 }
 
 static int archeology_unlink(const char *path) {
-    char fpath[MAX_PATH];
-    snprintf(fpath, sizeof(fpath), "%s%s", dirpath, path);
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
 
+    int part_num = 0;
+    char part_path[1100];
     int res = 0;
-    char part_file[MAX_PATH];
-    for (int i = 0;; i++) {
-        snprintf(part_file, sizeof(part_file), "%s.part%03d", fpath, i);
-        res = unlink(part_file);
-        if (res == -1) {
-            if (errno == ENOENT)
-                break;
-            else
-                return -errno;
-        }
+
+    while (1) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        res = unlink(part_path);
+        if (res == -1 && errno == ENOENT) break;
+        else if (res == -1) return -errno;
+    }
+    return 0;
+}
+
+static int archeology_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    (void) fi;
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s.000", folder_path, path);
+
+    int res = creat(fpath, mode);
+    if (res == -1) return -errno;
+
+    close(res);
+    return 0;
+}
+
+static int archeology_truncate(const char *path, off_t size) {
+    char fpath[1000];
+    snprintf(fpath, sizeof(fpath), "%s%s", folder_path, path);
+
+    int part_num = 0;
+    char part_path[1100];
+    off_t remaining_size = size;
+
+    while (remaining_size > 0) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        size_t part_size = remaining_size > 10000 ? 10000 : remaining_size;
+        int res = truncate(part_path, part_size);
+        if (res == -1) return -errno;
+        remaining_size -= part_size;
+    }
+
+    while (1) {
+        snprintf(part_path, sizeof(part_path), "%s.%03d", fpath, part_num++);
+        int res = unlink(part_path);
+        if (res == -1 && errno == ENOENT) break;
+        else if (res == -1) return -errno;
     }
 
     return 0;
@@ -152,6 +200,8 @@ static struct fuse_operations archeology_oper = {
     .read = archeology_read,
     .write = archeology_write,
     .unlink = archeology_unlink,
+    .create = archeology_create,
+    .truncate = archeology_truncate,
 };
 
 int main(int argc, char *argv[]) {

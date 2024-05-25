@@ -122,7 +122,140 @@ int main(int argc, char *argv[]) {
 ```
 
 #### > Penjelasan
+
+```bash
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+```
+#include <stdio.h>:
+Digunakan untuk fungsi input/output standar seperti printf, fprintf, snprintf, dll.
+Dalam kode ini, digunakan untuk menampilkan pesan ke terminal dan untuk membuat string command.
+
+#include <stdlib.h>:
+Digunakan untuk fungsi utilitas umum seperti system, malloc, free, exit, dll.
+Dalam kode ini, system digunakan untuk menjalankan perintah sistem dari dalam program C.
+
+#include <string.h>:
+Digunakan untuk fungsi manipulasi string seperti strrchr, strlen, strcpy, strcat, dll.
+Dalam kode ini, strrchr digunakan untuk mendapatkan pointer ke bagian terakhir dari string (khususnya, nama file dari path lengkap).
+
+#include <unistd.h>:
+Menyediakan akses ke API POSIX untuk operasi standar sistem seperti fork, exec, getpid, chdir, dll.
+Dalam kode ini, digunakan untuk fungsi access dan unlink (jika dibutuhkan, meskipun unlink tidak digunakan secara eksplisit dalam kode ini, fungsi remove dari stdlib.h sudah cukup).
+
+#include <sys/stat.h>:
+Digunakan untuk mengakses informasi file dan fungsi manajemen file/direktori seperti stat, mkdir, dll.
+Dalam kode ini, digunakan untuk mengecek keberadaan direktori (stat) dan membuat direktori (mkdir).
+
+```bash
+void add_watermark(const char *input_image, const char *output_image) {
+    char command[512];
+    snprintf(command, sizeof(command),
+             "convert %s -gravity SouthEast -pointsize 36 -fill white -annotate +10+10 'inikaryakita.id' %s",
+             input_image, output_image);
+    system(command);
+}
+```
+Deskripsi: Fungsi ini menambahkan watermark pada gambar menggunakan perintah convert dari ImageMagick.
+Parameter:
+input_image: Path ke gambar sumber yang akan diberi watermark.
+output_image: Path ke gambar hasil dengan watermark.
+Proses:
+Membuat command string menggunakan snprintf yang berisi perintah untuk menambahkan watermark "inikaryakita.id" di sudut kanan bawah gambar.
+Menjalankan perintah ini menggunakan system.
+
+```bash
+void move_and_watermark(const char *source, const char *destination_folder) {
+    char wm_folder[512];
+    snprintf(wm_folder, sizeof(wm_folder), "%s/wm-%s", destination_folder, "foto");
+
+    struct stat st = {0};
+    if (stat(wm_folder, &st) == -1) {
+        mkdir(wm_folder, 0700);
+    }
+
+    char destination_file[512];
+    snprintf(destination_file, sizeof(destination_file), "%s/%s", wm_folder, strrchr(source, '/') + 1);
+
+    add_watermark(source, destination_file);
+    remove(source);
+}
+```
+Deskripsi: Fungsi ini memindahkan file gambar ke folder tujuan setelah menambahkan watermark.
+Parameter:
+source: Path ke file gambar sumber.
+destination_folder: Path ke folder tujuan.
+Proses:
+Membuat path untuk folder tujuan dengan prefix wm-.
+Mengecek apakah folder tujuan sudah ada atau belum, jika belum maka folder dibuat.
+Menentukan path file tujuan dengan menggabungkan nama file sumber dengan folder tujuan.
+Memanggil fungsi add_watermark untuk menambahkan watermark pada gambar.
+Menghapus file sumber setelah proses watermark.
+
+```bash
+void reverse_test_files(const char *folder_path, const char *output_dir) {
+    char command[512];
+    snprintf(command, sizeof(command), "mkdir -p %s", output_dir);
+    system(command);
+
+    snprintf(command, sizeof(command),
+             "find %s -name 'inilho-*.txt' -exec sh -c 'for file; do "
+             "filename=$(basename \"$file\"); "
+             "rev \"$file\" > \"%s/${filename%%.txt}_reversed.txt\" && echo \"Reversed $file to %s/${filename%%.txt}_reversed.txt\"; "
+             "done' sh {} +", folder_path, output_dir, output_dir);
+    printf("Executing command: %s\n", command);
+    system(command);
+}
+```
+Deskripsi: Fungsi ini membalik isi dari file teks yang memenuhi pola nama tertentu dan menyimpan hasilnya di direktori keluaran.
+Parameter:
+folder_path: Path ke folder yang berisi file-file teks.
+output_dir: Path ke folder keluaran untuk menyimpan file hasil.
+Proses:
+Membuat folder keluaran jika belum ada.
+Mencari file teks dengan nama yang sesuai pola inilho-*.txt dan membalik isi file tersebut menggunakan perintah rev.
+Menyimpan hasil ke folder keluaran dengan menambahkan suffix _reversed.txt.
+
+```bash
+int main(int argc, char *argv[]) {
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <source_image> <destination_folder> <text_files_folder> <output_text_folder>\n", argv[0]);
+        return 1;
+    }
+
+    const char *source_image = argv[1];
+    const char *destination_folder = argv[2];
+    const char *text_files_folder = argv[3];
+    const char *output_text_folder = argv[4];
+
+    move_and_watermark(source_image, destination_folder);
+    reverse_test_files(text_files_folder, output_text_folder);
+
+    return 0;
+}
+```
+Deskripsi: Fungsi utama yang mengendalikan alur program.
+Parameter: Menerima 4 argumen dari command line.
+source_image: Path ke gambar sumber.
+destination_folder: Path ke folder tujuan untuk gambar yang sudah diberi watermark.
+text_files_folder: Path ke folder yang berisi file-file teks.
+output_text_folder: Path ke folder keluaran untuk menyimpan file teks yang sudah dibalik isinya.
+Proses:
+Memeriksa jumlah argumen yang diberikan. Jika tidak sesuai, menampilkan pesan penggunaan dan keluar dengan kode status 1.
+Memanggil move_and_watermark untuk memindahkan dan menambahkan watermark pada gambar.
+Memanggil reverse_test_files untuk membalik isi file teks yang sesuai dan menyimpan hasilnya di folder keluaran.
+Program ini menggabungkan fungsi dari sistem operasi (seperti system, stat, mkdir, remove) dan utilitas eksternal (ImageMagick dan rev) untuk melakukan operasi yang diinginkan.
+
+
 #### > Dokumentasi
+![Pasted Graphic](https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/137234298/f6f05832-e426-44fd-898f-c832b75bd08d)
+<img width="243" alt="image" src="https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/137234298/0d792ad9-17b3-4160-baad-fe323a6a3e22">
+<img width="582" alt="image" src="https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/137234298/28c311dc-6fd0-4ce3-b926-51cf4ee7bfd9">
+<img width="438" alt="image" src="https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/137234298/2383adeb-6a0e-4876-abd4-9ce9789179cc">
+
 #### > Revisi
 
 ---

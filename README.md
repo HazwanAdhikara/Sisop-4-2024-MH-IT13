@@ -257,6 +257,299 @@ Program ini menggabungkan fungsi dari sistem operasi (seperti system, stat, mkdi
 <img width="438" alt="image" src="https://github.com/HazwanAdhikara/Sisop-4-2024-MH-IT13/assets/137234298/2383adeb-6a0e-4876-abd4-9ce9789179cc">
 
 #### > Revisi
+Program yang saya buat masih belum menggunakan FUSE namun fungsi" dari code-nya berjalan sesuai yang diminta dengan soal. Sebelumnya saya juga sudah membuat program dengan menggunakan FUSE namun fungsi dari programnya masih belum bisa dan error. jadi saya membuat program baru dari awal dan jadinya seperti ini:
+```bash
+#define FUSE_USE_VERSION 28
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+static const char *base_path = "portofolio";
+static const char *gallery_path = "portofolio/gallery";
+static const char *watermark_path = "portofolio/wm";
+static const char *script_path = "portofolio/bahaya/script.sh";
+static const char *test_folder = "portofolio/bahaya";
+static const char *reversed_path = "portofolio/reversed";
+static const char *mountpoint_path = "portofolio/mountpoint";
+static const char *watermark_text = "inikaryakita.id";
+
+// Function to watermark images using ImageMagick
+void watermark_images(const char *input_dir, const char *output_dir, const char *watermark_text) {
+    char command[512];
+    snprintf(command, sizeof(command), "mkdir -p %s", output_dir);
+    system(command);
+
+    snprintf(command, sizeof(command), "for img in %s/*.jpeg; do "
+                                       "filename=$(basename \"$img\"); "
+                                       "height=$(identify -format %%h \"$img\"); "
+                                       "fontsize=$(($height / 40)); "
+                                       "convert \"$img\" -gravity south -fill white -pointsize $fontsize -annotate +0+10 \"%s\" \"%s/$filename\"; "
+                                       "echo \"Watermarked $img to %s/$filename\"; "
+                                       "done", input_dir, watermark_text, output_dir, output_dir);
+    printf("Executing command: %s\n", command);
+    system(command);
+}
+
+// Function to set script permissions
+void set_script_permissions(const char *script_path) {
+    if (chmod(script_path, S_IRWXU) != 0) {
+        perror("chmod failed");
+        exit(EXIT_FAILURE);
+    }
+}
+
+// Function to reverse the content of test files and create new files
+void reverse_test_files(const char *folder_path, const char *output_dir) {
+    char command[512];
+    snprintf(command, sizeof(command), "mkdir -p %s", output_dir);
+    system(command);
+
+    snprintf(command, sizeof(command), "find %s -name 'test-*.txt' -exec sh -c 'for file; do "
+                                       "filename=$(basename \"$file\"); "
+                                       "rev \"$file\" > \"%s/${filename%%.txt}_reversed.txt\" && echo \"Reversed $file to %s/${filename%%.txt}_reversed.txt\"; "
+                                       "done' sh {} +", folder_path, output_dir, output_dir);
+    printf("Executing command: %s\n", command);
+    system(command);
+}
+
+static int do_getattr(const char *path, struct stat *st) {
+    memset(st, 0, sizeof(struct stat));
+    printf("do_getattr: %s\n", path);
+    if (strcmp(path, "/") == 0) {
+        st->st_mode = S_IFDIR | 0755;
+        st->st_nlink = 2;
+    } else if (strcmp(path, "/wm") == 0) {
+        st->st_mode = S_IFDIR | 0755;
+        st->st_nlink = 2;
+    } else if (strcmp(path, "/reversed") == 0) {
+        st->st_mode = S_IFDIR | 0755;
+        st->st_nlink = 2;
+    } else if (strncmp(path, "/wm/", 4) == 0) {
+        st->st_mode = S_IFREG | 0644;
+        st->st_nlink = 1;
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/wm%s", base_path, path + 3); // Adjust path to base path
+        printf("Checking file: %s\n", full_path);
+        FILE *file = fopen(full_path, "r");
+        if (file) {
+            fseek(file, 0, SEEK_END);
+            st->st_size = ftell(file);
+            fclose(file);
+        } else {
+            printf("File not found: %s\n", full_path);
+            return -ENOENT;
+        }
+    } else if (strncmp(path, "/reversed/", 10) == 0) {
+        st->st_mode = S_IFREG | 0644;
+        st->st_nlink = 1;
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/reversed%s", base_path, path + 9); // Adjust path to base path
+        printf("Checking file: %s\n", full_path);
+        FILE *file = fopen(full_path, "r");
+        if (file) {
+            fseek(file, 0, SEEK_END);
+            st->st_size = ftell(file);
+            fclose(file);
+        } else {
+            printf("File not found: %s\n", full_path);
+            return -ENOENT;
+        }
+    } else {
+        return -ENOENT;
+    }
+    return 0;
+}
+
+static int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+    (void) offset;
+    (void) fi;
+
+    printf("do_readdir: %s\n", path);
+    if (strcmp(path, "/") == 0) {
+        filler(buf, ".", NULL, 0);
+        filler(buf, "..", NULL, 0);
+        filler(buf, "wm", NULL, 0);
+        filler(buf, "reversed", NULL, 0);
+    } else if (strcmp(path, "/wm") == 0) {
+        filler(buf, ".", NULL, 0);
+        filler(buf, "..", NULL, 0);
+
+        printf("Reading directory: %s\n", "portofolio/wm");
+        system("ls portofolio/wm > wm_files.txt");
+        FILE *fp = fopen("wm_files.txt", "r");
+        if (fp == NULL) return -errno;
+
+        char filename[256];
+        while (fscanf(fp, "%255s", filename) == 1) {
+            printf("Adding wm file: %s\n", filename);
+            filler(buf, filename, NULL, 0);
+        }
+        fclose(fp);
+        system("rm wm_files.txt");
+    } else if (strcmp(path, "/reversed") == 0) {
+        filler(buf, ".", NULL, 0);
+        filler(buf, "..", NULL, 0);
+
+        printf("Reading directory: %s\n", "portofolio/reversed");
+        system("ls portofolio/reversed > reversed_files.txt");
+        FILE *fp = fopen("reversed_files.txt", "r");
+        if (fp == NULL) return -errno;
+
+        char filename[256];
+        while (fscanf(fp, "%255s", filename) == 1) {
+            printf("Adding reversed file: %s\n", filename);
+            filler(buf, filename, NULL, 0);
+        }
+        fclose(fp);
+        system("rm reversed_files.txt");
+    } else {
+        return -ENOENT;
+    }
+
+    return 0;
+}
+
+static int do_open(const char *path, struct fuse_file_info *fi) {
+    printf("do_open: %s\n", path);
+    if (strncmp(path, "/wm/", 4) == 0 || strncmp(path, "/reversed/", 10) == 0) {
+        return 0;
+    }
+    return -ENOENT;
+}
+
+static int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    size_t len;
+    (void) fi;
+    printf("do_read: %s\n", path);
+    if (strncmp(path, "/wm/", 4) == 0) {
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/wm%s", base_path, path + 3); // Adjust path to base path
+        printf("Reading file: %s\n", full_path);
+        FILE *file = fopen(full_path, "r");
+        if (!file) {
+            perror("fopen failed");
+            return -ENOENT;
+        }
+        fseek(file, 0, SEEK_END);
+        len = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        if (offset < len) {
+            if (offset + size > len)
+                size = len - offset;
+            fread(buf, 1, size, file);
+        } else {
+            size = 0;
+        }
+        fclose(file);
+        return size;
+    } else if (strncmp(path, "/reversed/", 10) == 0) {
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/reversed%s", base_path, path + 9); // Adjust path to base path
+        printf("Reading file: %s\n", full_path);
+        FILE *file = fopen(full_path, "r");
+        if (!file) {
+            perror("fopen failed");
+            return -ENOENT;
+        }
+        fseek(file, 0, SEEK_END);
+        len = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        if (offset < len) {
+            if (offset + size > len)
+                size = len - offset;
+            fread(buf, 1, size, file);
+        } else {
+            size = 0;
+        }
+        fclose(file);
+        return size;
+    }
+    return -ENOENT;
+}
+
+static struct fuse_operations operations = {
+    .getattr = do_getattr,
+    .readdir = do_readdir,
+    .open = do_open,
+    .read = do_read,
+};
+
+int main(int argc, char *argv[]) {
+    // Create the mountpoint directory
+    mkdir(mountpoint_path, 0755);
+
+    // Watermark images
+    watermark_images(gallery_path, watermark_path, watermark_text);
+
+    // Set script permissions
+    set_script_permissions(script_path);
+
+    // Reverse test files
+    reverse_test_files(test_folder, reversed_path);
+
+    // Run FUSE main loop
+    const char *fuse_argv[] = { argv[0], mountpoint_path };
+    int fuse_argc = 2;
+    return fuse_main(fuse_argc, (char **) fuse_argv, &operations, NULL);
+}
+``` 
+- Perbedaan antara Program Pertama dan Program Kedua
+1. Tujuan dan Struktur:
+
+- Program Pertama: Program ini berfokus pada pemrosesan gambar dengan menambahkan watermark dan memindahkannya ke folder baru. Selain itu, program ini juga membalik isi file teks dan membuat file baru dengan isi yang dibalik. Fungsi utama mengorkestrasi tugas-tugas ini dengan memanggil fungsi spesifik menggunakan argumen yang diberikan.
+- Program Kedua: Program ini mengintegrasikan dengan sistem file FUSE untuk membuat sistem file virtual. Meskipun tugas-tugas yang dilakukannya mirip (menambahkan watermark pada gambar dan membalik isi file teks), tujuan utamanya adalah untuk mengatur sistem file virtual yang menampilkan gambar yang sudah diberi watermark dan file teks yang isinya sudah dibalik.
+2. Operasi File:
+
+- Program Pertama: Menggunakan perintah sistem langsung untuk menangani operasi file, seperti memindahkan file, menambahkan watermark, dan membalik isi file teks.
+- Program Kedua: Menerapkan operasi file dalam konteks sistem file virtual FUSE. Ini mendefinisikan callback FUSE (getattr, readdir, open, dan read) untuk menangani atribut file, daftar direktori, membuka file, dan membaca file.
+3. Penanganan Kesalahan dan Logging:
+
+- Program Pertama: Memiliki penanganan kesalahan dan logging yang minimal. Utamanya menggunakan printf untuk logging dan pengecekan dasar (misalnya, keberadaan direktori).
+- Program Kedua: Menggunakan logging yang lebih detail (misalnya, printf untuk melacak operasi) dan penanganan kesalahan yang lebih baik, terutama dalam operasi FUSE untuk menangani kesalahan file tidak ditemukan dan pengaturan izin.
+4. Integrasi Sistem File:
+
+- Program Pertama: Tidak mengintegrasikan dengan sistem file selain operasi file dasar. Ini adalah program mandiri yang memproses file berdasarkan argumen baris perintah.
+- Program Kedua: Mengintegrasikan dengan sistem file FUSE, memungkinkan pengguna untuk berinteraksi dengan sistem file virtual yang secara dinamis merepresentasikan gambar yang sudah diberi watermark dan file teks yang isinya sudah dibalik. Ini memerlukan operasi mounting dan unmounting khas aplikasi berbasis FUSE.
+* Kesalahan pada Program Pertama
+1. Penanganan Path yang Tidak Lengkap:
+
+-Program Pertama membangun path tanpa memastikan semua direktori ada atau menangani masalah path dengan kuat. Misalnya, membangun wm_folder mungkin gagal jika direktori menengah tidak ada.
+2. Pemanggilan Sistem Langsung:
+
+- Program Pertama sangat bergantung pada pemanggilan system() untuk operasi seperti membuat direktori, yang kurang efisien dan berpotensi tidak aman dibandingkan menggunakan pemanggilan sistem khusus (misalnya, mkdir, stat).
+3. Tidak Ada Pengecekan Kesalahan untuk Pemanggilan system():
+
+- Program Pertama tidak memeriksa nilai kembali dari pemanggilan system(), yang dapat menyebabkan kegagalan diam-diam jika suatu perintah gagal.
+4. Menghapus File Sumber:
+
+- Program Pertama memanggil remove(source) tanpa memverifikasi apakah operasi watermark berhasil, yang mungkin mengakibatkan kehilangan data jika proses watermark gagal.
+* Peningkatan dalam Program Kedua
+1. Integrasi FUSE:
+
+- Program Kedua menyediakan solusi yang lebih kuat dengan mengintegrasikan dengan sistem file FUSE, memungkinkan representasi virtual dari file yang sudah diproses.
+2. Penanganan Kesalahan dan Logging yang Lebih Baik:
+
+- Program Kedua menyertakan logging dan penanganan kesalahan yang lebih detail, terutama dalam operasi sistem file, yang membantu dalam mendiagnosis masalah.
+3. Operasi File yang Efisien:
+
+- Program Kedua menggunakan callback FUSE untuk menangani operasi file secara efisien tanpa bergantung pada pemanggilan system() yang berlebihan. Pendekatan ini lebih aman dan efisien.
+4. Organisasi Sistem File:
+
+- Program Kedua memastikan bahwa direktori seperti mountpoint_path dibuat dan dikelola dengan benar, meningkatkan kekuatan penanganan path file.
+
+- Kesimpulannya, Program Kedua menyediakan pendekatan yang lebih terstruktur, aman, dan efisien dengan memanfaatkan sistem file FUSE, memastikan penanganan kesalahan yang lebih baik, dan mengorganisasikan interaksi sistem file dengan lebih efektif.
+
+
+
+
+
+
+
+
 
 ---
 

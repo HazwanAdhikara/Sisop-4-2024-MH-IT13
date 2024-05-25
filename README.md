@@ -37,7 +37,90 @@ Struktur Repository Seperti Berikut:
 `> Andre`
 
 #### > Isi Soal
+Adfi merupakan seorang CEO agency creative bernama Ini Karya Kita. Ia sedang melakukan inovasi pada manajemen project photography Ini Karya Kita. Salah satu ide yang dia kembangkan adalah tentang pengelolaan foto project dalam sistem arsip Ini Karya Kita. Dalam membangun sistem ini, Adfi tidak bisa melakukannya sendirian, dia perlu bantuan mahasiswa Departemen Teknologi Informasi angkatan 2023 untuk membahas konsep baru yang akan mengubah project fotografinya lebih menarik untuk dilihat. Adfi telah menyiapkan portofolio hasil project fotonya yang bisa didownload dan diakses di www.inikaryakita.id . Silahkan eksplorasi web Ini Karya Kita dan temukan halaman untuk bisa mendownload projectnya. Setelah kalian download terdapat folder gallery dan bahaya.
+- Pada folder “gallery”:
+Membuat folder dengan prefix "wm." Dalam folder ini, setiap gambar yang dipindahkan ke dalamnya akan diberikan watermark bertuliskan inikaryakita.id. 
+			Ex: "mv ikk.jpeg wm-foto/" 
+Output: 
+Before: (tidak ada watermark bertuliskan inikaryakita.id)
+After: (terdapat watermark tulisan inikaryakita.id)
+
+- Pada folder "bahaya," terdapat file bernama "script.sh." Adfi menyadari pentingnya menjaga keamanan dan integritas data dalam folder ini. 
+
+Mereka harus mengubah permission pada file "script.sh" agar bisa dijalankan, karena jika dijalankan maka dapat menghapus semua dan isi dari  "gallery"
+
+Adfi dan timnya juga ingin menambahkan fitur baru dengan membuat file dengan prefix "test" yang ketika disimpan akan mengalami pembalikan (reverse) isi dari file tersebut.  
+
 #### > Penyelesaian
+```bash
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+void add_watermark(const char *input_image, const char *output_image) {
+    char command[512];
+    snprintf(command, sizeof(command),
+             "convert %s -gravity SouthEast -pointsize 36 -fill white -annotate +10+10 'inikaryakita.id' %s",
+             input_image, output_image);
+    system(command);
+}
+
+void move_and_watermark(const char *source, const char *destination_folder) {
+    // Construct the destination folder with prefix 'wm.'
+    char wm_folder[512];
+    snprintf(wm_folder, sizeof(wm_folder), "%s/wm-%s", destination_folder, "foto");
+
+    // Create the wm_folder if it does not exist
+    struct stat st = {0};
+    if (stat(wm_folder, &st) == -1) {
+        mkdir(wm_folder, 0700);
+    }
+
+    // Construct the destination file path
+    char destination_file[512];
+    snprintf(destination_file, sizeof(destination_file), "%s/%s", wm_folder, strrchr(source, '/') + 1);
+
+    // Add watermark and move file
+    add_watermark(source, destination_file);
+    remove(source);
+}
+
+void reverse_test_files(const char *folder_path, const char *output_dir) {
+    char command[512];
+    snprintf(command, sizeof(command), "mkdir -p %s", output_dir);
+    system(command);
+
+    snprintf(command, sizeof(command),
+             "find %s -name 'inilho-*.txt' -exec sh -c 'for file; do "
+             "filename=$(basename \"$file\"); "
+             "rev \"$file\" > \"%s/${filename%%.txt}_reversed.txt\" && echo \"Reversed $file to %s/${filename%%.txt}_reversed.txt\"; "
+             "done' sh {} +", folder_path, output_dir, output_dir);
+    printf("Executing command: %s\n", command);
+    system(command);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <source_image> <destination_folder> <text_files_folder> <output_text_folder>\n", argv[0]);
+        return 1;
+    }
+
+    // Arguments
+    const char *source_image = argv[1];
+    const char *destination_folder = argv[2];
+    const char *text_files_folder = argv[3];
+    const char *output_text_folder = argv[4];
+
+    // Perform tasks
+    move_and_watermark(source_image, destination_folder);
+    reverse_test_files(text_files_folder, output_text_folder);
+
+    return 0;
+}
+```
+
 #### > Penjelasan
 #### > Dokumentasi
 #### > Revisi
